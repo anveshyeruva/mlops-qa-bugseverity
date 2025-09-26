@@ -1,0 +1,11 @@
+id,title,description,severity
+1,Crash on level load,Game crashes when entering level 3,Critical
+2,UI misaligned,Inventory button overlaps text on 1080p,Minor
+3,Audio stutter,Sound glitches during combat on heavy SFX,Major
+4,Save fails on checkpoint,Saving throws error after boss fight,Critical
+5,Tooltip overlaps,Tooltip hides item stats in inventory,Minor
+6,Low FPS on city map,Frame rate drops below 20 fps in downtown,Major
+7,Login timeout,Players stuck on login screen intermittently,Major
+8,Tutorial softlock,Player can’t exit tutorial after step 5,Critical
+9,HDR washed out,Colors look faded when HDR is enabled,Minor
+10,Dialogue skip bug,Skipping dialogue sometimes freezes UI,Major
