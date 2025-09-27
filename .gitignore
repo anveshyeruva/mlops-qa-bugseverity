@@ -5,3 +5,6 @@ __pycache__/
 models/
 mlruns/
 data/**/*.parquet
+
+# MLflow
+mlruns/
