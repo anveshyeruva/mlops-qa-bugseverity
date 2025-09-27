@@ -50,7 +50,7 @@ jobs:
           for i in {1..20}; do
             BODY=$(curl -s http://127.0.0.1:8000/health || true)
             echo "Health: $BODY"
-            echo "$BODY" | grep -q '"model_loaded": true' && { echo "API is ready"; exit 0; }
+            echo "$BODY" | grep -E -q '"model_loaded":[[:space:]]*true' && { echo "API is ready"; exit 0; }
             sleep 1
           done
           echo "API not ready"
