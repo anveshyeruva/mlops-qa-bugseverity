@@ -37,10 +37,13 @@ jobs:
       - name: Start API (background)
         run: |
           echo "PWD=$(pwd)"
+          ls -l
           ls -l models || true
           test -f models/model.joblib || (echo "model missing"; exit 1)
           nohup uvicorn src.api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           sleep 3
+          echo "---- uvicorn.log (tail) ----"
+          tail -n +1 uvicorn.log | sed -n '1,40p' || true
 
       - name: Wait for /health
         run: |
@@ -50,7 +53,10 @@ jobs:
             echo "$BODY" | grep -q '"model_loaded": true' && { echo "API is ready"; exit 0; }
             sleep 1
           done
-          echo "API not ready"; echo "---- uvicorn.log ----"; cat uvicorn.log; exit 1
+          echo "API not ready"
+          echo "---- uvicorn.log ----"
+          cat uvicorn.log
+          exit 1
 
 
       # Now run integration tests (artifact checks + API smoke)
