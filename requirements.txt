@@ -4,3 +4,4 @@ joblib
 pytest
 fastapi
 uvicorn
+requests
