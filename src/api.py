@@ -13,19 +13,30 @@ class BugReport(BaseModel):
     title: str
     description: str
 
-@app.on_event("startup")
-def load_model():
+def ensure_model_loaded() -> bool:
     global model
-    if MODEL_PATH.exists():
-        model = joblib.load(MODEL_PATH)
+    try:
+        if model is None and MODEL_PATH.exists():
+            model = joblib.load(MODEL_PATH)
+    except Exception as e:
+        # Optional: log the error; keep model None
+        print(f"[api] model load failed: {e}")
+    return model is not None
+
+@app.on_event("startup")
+def load_model_on_startup():
+    # Best-effort load; /health will ensure loading too
+    ensure_model_loaded()
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": model is not None}
+    # Ensure model is loaded by the time health is queried
+    loaded = ensure_model_loaded()
+    return {"status": "ok", "model_loaded": loaded}
 
 @app.post("/predict")
 def predict(item: BugReport):
-    if model is None:
+    if not ensure_model_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded. Train first: python src/train.py")
     text = f"{item.title or ''} {item.description or ''}".strip()
     pred = model.predict([text])[0]
