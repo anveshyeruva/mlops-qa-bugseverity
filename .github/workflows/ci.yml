@@ -24,8 +24,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Run only fast tests that don't require artifacts/API
       - name: Unit tests (fast)
-        run: pytest -q
+        run: pytest -q -m "not integration"
 
       - name: Train model
         run: python src/train.py --data data/bugs.csv --outdir models
@@ -48,10 +49,11 @@ jobs:
           done
           echo "API not ready"; cat uvicorn.log; exit 1
 
-      - name: API smoke tests
+      # Now run integration tests (artifact checks + API smoke)
+      - name: Integration tests (artifacts + API)
         env:
           BASE_URL: http://127.0.0.1:8000
-        run: pytest -q tests/test_api_smoke.py
+        run: pytest -q -m integration
 
       - name: Upload metrics artifact
         uses: actions/upload-artifact@v4

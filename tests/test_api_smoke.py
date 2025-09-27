@@ -4,6 +4,9 @@ import json
 from pathlib import Path
 import requests
 import pandas as pd
+import pytest
+
+pytestmark = pytest.mark.integration
 
 BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
 
