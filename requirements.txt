@@ -1,8 +1,8 @@
-pandas
+ipandas
 scikit-learn
 joblib
 pytest
 fastapi
 uvicorn
 requests
-mlflow
+mlflow==2.16.0
