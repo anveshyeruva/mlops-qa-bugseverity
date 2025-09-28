@@ -1,7 +1,25 @@
-# 📑 Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and tags follow [Semantic Versioning](https://semver.org/).
+
+---
+
+## [v0.3.1] - 2025-09-27
+### Repo Hygiene & Documentation
+- Added `docs/repo-hygiene.md` with verification checklist and actual outputs for Steps 1–4.
+- Updated `.gitattributes` to enforce correct handling of:
+  - Source code & markdown → stored as text
+  - CSV data → diffable
+  - Models (`.joblib`, `.pkl`) → binary
+  - Images (PNG/JPG) → binary
+  - SVGs → text
+- Confirmed MLflow runs (`mlruns/`) excluded from versioning & stats.
+- Aligned hygiene with publication-ready standards.
+
+Tagged as `v0.3.1` (patch release) linked to Milestone 3.
+
+---
 
 ## [v0.3] - Step 4: MLflow Experiment Tracking
 - Integrated **MLflow** for experiment tracking.
@@ -13,31 +31,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and tags
 ---
 
 ## [v0.2] - 2025-09-27
-### 🚀 Added
+### Added
 - CI/CD pipeline with GitHub Actions (`.github/workflows/ci.yml`).
 - Automated smoke tests for API endpoints (`/health`, `/predict`).
 - Documentation for Step 3 (`docs/step3.md`).
 - Troubleshooting log for Step 3 (`docs/troubleshooting_step3.md`).
 
-### 🐞 Fixed
+### Fixed
 - CI failing on `/health` check due to timing issues → resolved with retry logic.
 - macOS permission error with `~/.config/gh` fixed using `chown`.
 
-### 🔗 References
+### References
 - Milestone: [Milestone 2](https://github.com/anveshyeruva/mlops-qa-bugseverity/milestone/2)
 - Release: [Release v0.2](https://github.com/anveshyeruva/mlops-qa-bugseverity/releases/tag/v0.2)
 
 ---
 
 ## [v0.1] - 2025-09-26
-### 🚀 Added
+### Added
 - Initial project setup with directories: `src/`, `data/`, `models/`, `tests/`, `docker/`.
 - Training script (`src/train.py`) and FastAPI service (`src/api.py`).
 - Smoke tests (`tests/test_model.py`, `tests/test_api_smoke.py`).
 - Docker support with `docker/Dockerfile`.
 - Documentation for Step 1 (`docs/step1.md`) and Step 2 (`docs/step2.md`).
 
-### 🔗 References
+### References
 - Milestone: [Milestone 1](https://github.com/anveshyeruva/mlops-qa-bugseverity/milestone/1)
 - Release: [Release v0.1](https://github.com/anveshyeruva/mlops-qa-bugseverity/releases/tag/v0.1)
 
