@@ -1,13 +1,89 @@
+# ----------------------
+# Python cache / bytecode
+# ----------------------
 __pycache__/
-*.pyc
-.pytest_cache/
-.env
-models/
-mlruns/
-data/**/*.parquet
+*.py[cod]
+*$py.class
 
-# MLflow
-mlruns/
-.DS_Store
+# ----------------------
+# Virtual environments
+# ----------------------
 .venv/
 .venv311/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ----------------------
+# Unit test / coverage
+# ----------------------
+.pytest_cache/
+.coverage
+*.cover
+*.log
+htmlcov/
+.tox/
+.nox/
+.cache/
+
+# ----------------------
+# Build / packaging
+# ----------------------
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ----------------------
+# Jupyter notebooks
+# ----------------------
+.ipynb_checkpoints/
+
+# ----------------------
+# PyInstaller
+# ----------------------
+*.manifest
+*.spec
+
+# ----------------------
+# IDE / editor configs
+# ----------------------
+.vscode/
+.idea/
+
+# ----------------------
+# Environment / secrets
+# ----------------------
+.env
+*.env
+
+# ----------------------
+# Data & models
+# ----------------------
+models/
+data/**/*.parquet
+
+# ----------------------
+# MLflow local runs
+# ----------------------
+mlruns/
+
+# ----------------------
+# System files
+# ----------------------
+.DS_Store
+Thumbs.db
+
