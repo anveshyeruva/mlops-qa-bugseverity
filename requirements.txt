@@ -1,17 +1,21 @@
-# Core ML
+# ---- Core ML
 pandas==2.2.2
 scikit-learn==1.4.2
 joblib==1.4.2
 
-# Service (FastAPI stack)
+# ---- Service (API)
 fastapi==0.112.2
 pydantic==2.8.2
 uvicorn==0.30.6
 requests==2.32.3
 
-# Experiment tracking
+# ---- Experiment tracking
 mlflow==2.16.0
 
-# Testing
+# ---- Testing
 pytest==8.2.2
+
+# ---- Optional parquet/Arrow support (only installs on Python < 3.13)
+# Keeps CI (Python 3.11) fully functional while your local 3.13 won't try to build wheels.
+pyarrow==14.0.2 ; python_version < "3.13"
 
