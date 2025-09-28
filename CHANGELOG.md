@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and tags follow [Semantic Versioning](https://semver.org/).
 
+## [v0.3] - Step 4: MLflow Experiment Tracking
+- Integrated **MLflow** for experiment tracking.
+- Added CLI flag `--mlflow` to enable/disable logging.
+- Model, metrics, and confusion matrix are now logged as artifacts.
+- Added `docs/step4.md` for documentation.
+- Added `docs/troubleshooting_step4.md` for troubleshooting notes.
+
 ---
 
 ## [v0.2] - 2025-09-27
