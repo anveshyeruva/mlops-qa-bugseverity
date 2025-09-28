@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
@@ -29,12 +28,11 @@ def load_data(path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing column(s) in {path}: {sorted(missing)}")
 
-    # Build a single text field the model expects
+    # Build a single text field
     df["title"] = df["title"].fillna("")
     df["description"] = df["description"].fillna("")
     df["text"] = (df["title"] + " " + df["description"]).str.strip()
 
-    # Keep only what we need
     df = df[["text", "severity"]].dropna()
     if df.empty:
         raise ValueError("No rows to train on after cleaning.")
@@ -49,11 +47,7 @@ def train_model(
     test_size: float = 0.25,
 ):
     X, y = df["text"].values, df["severity"].values
-
-    # Deterministic label order for metrics/confusion matrix
     label_list = sorted(pd.unique(y).tolist())
-
-    # Stratify only if more than one class present
     stratify = y if len(label_list) > 1 else None
 
     Xtr, Xte, ytr, yte = train_test_split(
@@ -67,7 +61,6 @@ def train_model(
         ]
     )
     pipe.fit(Xtr, ytr)
-
     yhat = pipe.predict(Xte)
 
     metrics = {
@@ -86,10 +79,12 @@ def main():
     ap = argparse.ArgumentParser(description="Train bug severity classifier & save artifacts.")
     ap.add_argument("--data", default="data/bugs.csv", help="Path to CSV with title, description, severity")
     ap.add_argument("--outdir", default="models", help="Output dir for model + metrics")
-    # MLflow options
+
+    # MLflow toggles
     ap.add_argument("--mlflow", action="store_true", help="Enable MLflow tracking/logging")
     ap.add_argument("--experiment", default="bug-severity", help="MLflow experiment name")
     ap.add_argument("--run-name", default=None, help="MLflow run name")
+
     args = ap.parse_args()
 
     outdir = Path(args.outdir)
@@ -98,7 +93,7 @@ def main():
     df = load_data(Path(args.data))
     model, metrics, (labels, cm) = train_model(df)
 
-    # Save artifacts locally (always)
+    # Save local artifacts (always)
     model_path = outdir / "model.joblib"
     metrics_path = outdir / "metrics.json"
     cm_path = outdir / "confusion_matrix.json"
@@ -111,7 +106,7 @@ def main():
     print("== Training complete ==")
     print(json.dumps(metrics, indent=2))
 
-    # Optional MLflow logging (signature-only; no input_example to avoid validation issues)
+    # Optional: MLflow logging (compatible with MLflow 2.16)
     if args.mlflow:
         mlflow, mlflow_sklearn = maybe_import_mlflow()
         mlflow.set_experiment(args.experiment)
@@ -132,19 +127,20 @@ def main():
             mlflow.log_artifact(str(metrics_path), artifact_path="artifacts")
             mlflow.log_artifact(str(cm_path), artifact_path="artifacts")
 
-            # Model with explicit signature (string -> string)
+            # Model with explicit signature (no input_example to avoid validation issues)
             from mlflow.models import ModelSignature
             from mlflow.types.schema import Schema, ColSpec
 
             signature = ModelSignature(
                 inputs=Schema([ColSpec("string")]),
-                outputs=Schema([ColSpec("string")]),
+                outputs=Schema([ColSpec("string")])
             )
 
+            # In MLflow 2.16, use artifact_path (name= not supported for sklearn helper)
             mlflow_sklearn.log_model(
                 sk_model=model,
-                name="bug-severity-model",
-                signature=signature,
+                artifact_path="bug-severity-model",
+                signature=signature
             )
 
             print("[mlflow] logged run:", mlflow.active_run().info.run_id)
