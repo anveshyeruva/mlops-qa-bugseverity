@@ -10,7 +10,7 @@ uvicorn==0.30.6
 requests==2.32.3
 
 # ---- Experiment tracking
-mlflow==2.16.0
+mlflow>=2.11
 
 # ---- Testing
 pytest==8.2.2

@@ -1,15 +1,19 @@
 # src/train.py
-import argparse
+import os
 import json
+import argparse
 from pathlib import Path
 
 import joblib
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix
 from sklearn.pipeline import Pipeline
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
+
+# --- Optional MLflow imports (lazy used) ---
+# If mlflow isn't installed, running without --mlflow still works.
 
 
 def maybe_import_mlflow():
@@ -17,8 +21,9 @@ def maybe_import_mlflow():
     Import MLflow lazily so the dependency is optional unless --mlflow is used.
     """
     import mlflow
-    from mlflow import sklearn as mlflow_sklearn
-    return mlflow, mlflow_sklearn
+    import mlflow.sklearn
+    from mlflow.tracking import MlflowClient
+    return mlflow, mlflow.sklearn, MlflowClient
 
 
 def load_data(path: Path) -> pd.DataFrame:
@@ -47,103 +52,122 @@ def train_model(
     test_size: float = 0.25,
 ):
     X, y = df["text"].values, df["severity"].values
-    label_list = sorted(pd.unique(y).tolist())
-    stratify = y if len(label_list) > 1 else None
 
-    Xtr, Xte, ytr, yte = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=stratify
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=y
     )
 
-    pipe = Pipeline(
+    pipeline = Pipeline(
         steps=[
-            ("tfidf", TfidfVectorizer(lowercase=True, stop_words="english", max_features=max_features)),
+            ("tfidf", TfidfVectorizer(max_features=max_features)),
             ("clf", LinearSVC()),
         ]
     )
-    pipe.fit(Xtr, ytr)
-    yhat = pipe.predict(Xte)
+
+    pipeline.fit(X_train, y_train)
+
+    y_pred = pipeline.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average="weighted")
+    cm = confusion_matrix(y_test, y_pred).tolist()
 
     metrics = {
-        "accuracy": float(accuracy_score(yte, yhat)),
-        "f1_macro": float(f1_score(yte, yhat, average="macro")),
-        "n_train": int(len(Xtr)),
-        "n_test": int(len(Xte)),
-        "labels": label_list,
+        "accuracy": float(acc),
+        "f1_weighted": float(f1),
+        "confusion_matrix": cm,
+        "n_train": int(len(X_train)),
+        "n_test": int(len(X_test)),
+        "max_features": int(max_features),
     }
+    return pipeline, metrics
 
-    cm = confusion_matrix(yte, yhat, labels=label_list)
-    return pipe, metrics, (label_list, cm.tolist())
+
+def save_locally(model, metrics: dict, outdir: Path):
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    model_path = outdir / "model.pkl"
+    metrics_path = outdir / "metrics.json"
+
+    joblib.dump(model, model_path)
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2)
+
+    print(f"[local] Saved model → {model_path}")
+    print(f"[local] Saved metrics → {metrics_path}")
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Bug Severity Classifier Trainer")
+    p.add_argument("--data", type=Path, default=Path("data/bugs.csv"),
+                   help="Path to CSV with columns: title, description, severity")
+    p.add_argument("--outdir", type=Path, default=Path("models"),
+                   help="Output directory for local artifacts")
+    p.add_argument("--max-features", type=int, default=20_000)
+    p.add_argument("--test-size", type=float, default=0.25)
+    p.add_argument("--random-state", type=int, default=42)
+
+    # --- MLflow / Registry flags ---
+    p.add_argument("--mlflow", action="store_true",
+                   help="Log run to MLflow, register model, and move to Staging")
+    p.add_argument("--registry-name", default="bug-severity-clf",
+                   help="MLflow Registered Model name")
+
+    return p.parse_args()
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Train bug severity classifier & save artifacts.")
-    ap.add_argument("--data", default="data/bugs.csv", help="Path to CSV with title, description, severity")
-    ap.add_argument("--outdir", default="models", help="Output dir for model + metrics")
+    args = parse_args()
 
-    # MLflow toggles
-    ap.add_argument("--mlflow", action="store_true", help="Enable MLflow tracking/logging")
-    ap.add_argument("--experiment", default="bug-severity", help="MLflow experiment name")
-    ap.add_argument("--run-name", default=None, help="MLflow run name")
+    # Load & train
+    df = load_data(args.data)
+    model, metrics = train_model(
+        df,
+        max_features=args.max_features,
+        random_state=args.random_state,
+        test_size=args.test_size,
+    )
 
-    args = ap.parse_args()
+    # Always save locally (keeps your previous behavior)
+    save_locally(model, metrics, args.outdir)
 
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    df = load_data(Path(args.data))
-    model, metrics, (labels, cm) = train_model(df)
-
-    # Save local artifacts (always)
-    model_path = outdir / "model.joblib"
-    metrics_path = outdir / "metrics.json"
-    cm_path = outdir / "confusion_matrix.json"
-
-    joblib.dump(model, model_path)
-    metrics_path.write_text(json.dumps(metrics, indent=2))
-    cm_payload = {"labels": labels, "confusion_matrix": cm}
-    cm_path.write_text(json.dumps(cm_payload, indent=2))
-
-    print("== Training complete ==")
-    print(json.dumps(metrics, indent=2))
-
-    # Optional: MLflow logging (compatible with MLflow 2.16)
+    # --- MLflow logging & registration (only if --mlflow) ---
     if args.mlflow:
-        mlflow, mlflow_sklearn = maybe_import_mlflow()
-        mlflow.set_experiment(args.experiment)
-        with mlflow.start_run(run_name=args.run_name):
-            # Params
-            mlflow.log_param("model", "LinearSVC")
-            mlflow.log_param("tfidf_max_features", 20_000)
-            mlflow.log_param("test_size", 0.25)
-            mlflow.log_param("random_state", 42)
+        try:
+            mlflow, mlflow_sklearn, MlflowClient = maybe_import_mlflow()
+        except Exception as e:
+            raise SystemExit(
+                "You passed --mlflow but MLflow is not available. "
+                "Add 'mlflow' to requirements and reinstall."
+            ) from e
 
-            # Metrics
-            mlflow.log_metric("accuracy", metrics["accuracy"])
-            mlflow.log_metric("f1_macro", metrics["f1_macro"])
-            mlflow.log_metric("n_train", metrics["n_train"])
-            mlflow.log_metric("n_test", metrics["n_test"])
+        tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+        mlflow.set_tracking_uri(tracking_uri)
 
-            # Artifacts
-            mlflow.log_artifact(str(metrics_path), artifact_path="artifacts")
-            mlflow.log_artifact(str(cm_path), artifact_path="artifacts")
+        with mlflow.start_run() as run:
+            # Log numeric metrics (ignore non-numeric safely)
+            if isinstance(metrics, dict):
+                for k, v in metrics.items():
+                    try:
+                        mlflow.log_metric(k, float(v))
+                    except Exception:
+                        pass
 
-            # Model with explicit signature (no input_example to avoid validation issues)
-            from mlflow.models import ModelSignature
-            from mlflow.types.schema import Schema, ColSpec
+            # Log model artifact
+            mlflow_sklearn.log_model(model, artifact_path="model")
+            run_id = run.info.run_id
 
-            signature = ModelSignature(
-                inputs=Schema([ColSpec("string")]),
-                outputs=Schema([ColSpec("string")])
-            )
+        # Register & promote to Staging
+        model_uri = f"runs:/{run_id}/model"
+        reg_name = args.registry_name
 
-            # In MLflow 2.16, use artifact_path (name= not supported for sklearn helper)
-            mlflow_sklearn.log_model(
-                sk_model=model,
-                artifact_path="bug-severity-model",
-                signature=signature
-            )
-
-            print("[mlflow] logged run:", mlflow.active_run().info.run_id)
+        mv = mlflow.register_model(model_uri=model_uri, name=reg_name)
+        MlflowClient().transition_model_version_stage(
+            name=reg_name,
+            version=mv.version,
+            stage="Staging",
+            archive_existing_versions=False,
+        )
+        print(f"[mlflow] Registered {reg_name} v{mv.version} → Staging @ {tracking_uri}")
 
 
 if __name__ == "__main__":
