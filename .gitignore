@@ -9,3 +9,5 @@ data/**/*.parquet
 # MLflow
 mlruns/
 .DS_Store
+.venv/
+.venv311/
