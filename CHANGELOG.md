@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and tags
 
 ---
 
+## [v0.3.2] - 2025-09-28
+### Fixed
+- Align Docker base image to Python 3.11 (matches GitHub Actions CI)
+- Cleaned `.dockerignore` to exclude unnecessary files (`data/`, `models/`)
+- Updated `docker/Dockerfile` to ensure empty directories (`data/`, `models/`) exist inside container
+- Pinned dependencies in `requirements.txt` for reproducible builds across macOS and Windows
+
+### Notes
+This patch ensures that Docker builds succeed consistently in CI and local environments, and guarantees reproducible runs for future publication and paper-ready workflows.
+
+---
+
 ## [v0.3.1] - 2025-09-27
 ### Repo Hygiene & Documentation
 - Added `docs/repo-hygiene.md` with verification checklist and actual outputs for Steps 1–4.
