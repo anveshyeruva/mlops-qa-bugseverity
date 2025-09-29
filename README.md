@@ -1,5 +1,7 @@
 # 🐞 QA-Driven MLOps: Bug Severity Classifier
 
+![CI](https://github.com/anveshyeruva/mlops-qa-bugseverity/actions/workflows/ci.yml/badge.svg)
+
 This project demonstrates **QA-first MLOps practices** using a simple bug severity classifier.  
 It takes text-based bug reports (title + description) and predicts their severity (`Critical`, `Major`, `Minor`).
 
