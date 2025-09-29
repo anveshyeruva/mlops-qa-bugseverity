@@ -2,50 +2,112 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
-import joblib, os
+import os
+import joblib
+from typing import Optional, Tuple, Any, Dict
 
-app = FastAPI(title="Bug Severity API", version="0.1.0")
+from src.registry import load_stage_model
 
-# Resolve repo root regardless of current working directory
+app = FastAPI(title="Bug Severity API", version="0.3.0")
+
+# -------- Config --------
+PREDICT_MODEL_SOURCE = os.getenv("PREDICT_MODEL_SOURCE", "local").lower()  # "local" | "registry"
+
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = ROOT / "models" / "model.joblib"
+LOCAL_MODEL_PATH = ROOT / "models" / "model.joblib"
 
-model = None
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+MLFLOW_MODEL_NAME = os.getenv("MLFLOW_MODEL_NAME", "bug-severity-clf")
+MLFLOW_MODEL_STAGE = os.getenv("MLFLOW_MODEL_STAGE", "Production")
+
+# -------- State --------
+_LOCAL_MODEL: Optional[Any] = None
+_LOCAL_META: Dict[str, Any] = {}
+
+_REG_MODEL: Optional[Any] = None
+_REG_META: Dict[str, Any] = {}
 
 class BugReport(BaseModel):
     title: str
     description: str
 
-def ensure_model_loaded() -> bool:
-    global model
-    try:
-        if model is None and MODEL_PATH.exists():
-            print(f"[api] loading model from: {MODEL_PATH}")
-            model = joblib.load(MODEL_PATH)
-            print(f"[api] model loaded ok")
-        elif not MODEL_PATH.exists():
-            print(f"[api] model file not found at: {MODEL_PATH}")
-    except Exception as e:
-        # Log the error; keep model None so health shows false
-        print(f"[api] model load failed: {e}")
-    return model is not None
+# -------- Loaders --------
+def _load_local_model() -> Tuple[Any, Dict[str, Any]]:
+    if not LOCAL_MODEL_PATH.exists():
+        raise RuntimeError(f"Local model not found at {LOCAL_MODEL_PATH}. Train first: python src/train.py")
+    model = joblib.load(LOCAL_MODEL_PATH)
+    meta = {"source": "local", "model_path": str(LOCAL_MODEL_PATH), "stage": None, "version": None, "model_uri": None}
+    return model, meta
 
-@app.on_event("startup")
-def load_model_on_startup():
-    print(f"[api] startup cwd={os.getcwd()}")
-    print(f"[api] expected model path={MODEL_PATH}")
-    ensure_model_loaded()
+def _ensure_local_loaded():
+    global _LOCAL_MODEL, _LOCAL_META
+    if _LOCAL_MODEL is None:
+        _LOCAL_MODEL, _LOCAL_META = _load_local_model()
 
+def _ensure_registry_loaded():
+    global _REG_MODEL, _REG_META
+    if _REG_MODEL is None:
+        _REG_MODEL, _REG_META = load_stage_model(name=MLFLOW_MODEL_NAME, stage=MLFLOW_MODEL_STAGE)
+
+def _ensure_default_loaded():
+    if PREDICT_MODEL_SOURCE == "registry":
+        _ensure_registry_loaded()
+    else:
+        _ensure_local_loaded()
+
+# -------- Endpoints --------
 @app.get("/health")
 def health():
-    loaded = ensure_model_loaded()
-    return {"status": "ok", "model_loaded": loaded}
+    try:
+        _ensure_default_loaded()
+        meta = (_REG_META if PREDICT_MODEL_SOURCE == "registry" else _LOCAL_META).copy()
+        return {"status": "ok", "source_mode": PREDICT_MODEL_SOURCE, **meta}
+    except Exception as e:
+        return {"status": "degraded", "error": str(e), "source_mode": PREDICT_MODEL_SOURCE}
 
 @app.post("/predict")
 def predict(item: BugReport):
-    if not ensure_model_loaded():
-        raise HTTPException(status_code=503, detail="Model not loaded. Train first: python src/train.py")
+    try:
+        _ensure_default_loaded()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Model not available: {e}")
+
     text = f"{item.title or ''} {item.description or ''}".strip()
-    pred = model.predict([text])[0]
-    return {"severity": pred}
+    model = _REG_MODEL if PREDICT_MODEL_SOURCE == "registry" else _LOCAL_MODEL
+    try:
+        pred = model.predict([text])[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+    return {"severity": str(pred)}
+
+@app.post("/predict-mlflow")
+def predict_mlflow(item: BugReport):
+    """Force serving from MLflow registry (Production by default)."""
+    try:
+        _ensure_registry_loaded()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Registry model not available: {e}")
+
+    text = f"{item.title or ''} {item.description or ''}".strip()
+    try:
+        pred = _REG_MODEL.predict([text])[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Prediction failed: {e}")
+
+    return {"severity": str(pred), "meta": _REG_META}
+
+@app.post("/reload")
+def reload_model():
+    global _LOCAL_MODEL, _LOCAL_META, _REG_MODEL, _REG_META
+    _LOCAL_MODEL = None
+    _LOCAL_META = {}
+    _REG_MODEL = None
+    _REG_META = {}
+    try:
+        _ensure_default_loaded()
+        meta = _REG_META if PREDICT_MODEL_SOURCE == "registry" else _LOCAL_META
+        return {"status": "reloaded", **meta}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reload failed: {e}")
 
