@@ -41,6 +41,25 @@ def load_data(path: Path) -> pd.DataFrame:
     df = df[["text", "severity"]].dropna()
     if df.empty:
         raise ValueError("No rows to train on after cleaning.")
+   
+    # --- normalize severity labels ---
+    mapping = {
+        "low": "Minor",
+        "medium": "Major",
+        "high": "Critical",
+        "critical": "Critical",
+        "minor": "Minor",
+        "major": "Major"
+    }
+    df["severity"] = (
+        df["severity"]
+        .astype(str)
+        .str.lower()
+        .str.strip()
+        .map(mapping)
+        .fillna(df["severity"])  # fallback: keep original if not in mapping
+    )
+
     return df
 
 
@@ -78,6 +97,7 @@ def train_model(
         "n_train": int(len(X_train)),
         "n_test": int(len(X_test)),
         "max_features": int(max_features),
+        "labels": sorted(set(y))
     }
     return pipeline, metrics
 
