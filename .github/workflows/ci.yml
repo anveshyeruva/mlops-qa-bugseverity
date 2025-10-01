@@ -40,30 +40,12 @@ jobs:
           echo "PWD=$(pwd)"
           ls -l
           ls -l models || true
-          # Accept either filename
           test -f models/model.joblib || test -f models/model.pkl || (echo "model missing"; exit 1)
           nohup uvicorn src.api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
-          sleep 3
-          echo "---- uvicorn.log (tail) ----"
-          tail -n +1 uvicorn.log | sed -n '1,80p' || true
-
-      - name: Wait for /health
-        shell: bash
-        run: |
-          set -e
           for i in {1..20}; do
-            BODY=$(curl -s http://127.0.0.1:8000/health || true)
-            echo "Attempt $i: $BODY"
-            if echo "$BODY" | grep -qi "ok"; then
-              echo "API is healthy."
-              exit 0
-            fi
             sleep 1
+            curl -sf http://127.0.0.1:8000/health && break || true
           done
-          echo "API did not become healthy in time."
-          echo "---- uvicorn.log (last 200) ----"
-          tail -n 200 uvicorn.log || true
-          exit 1
 
       - name: Invoke /predict (smoke)
         run: |
@@ -89,7 +71,7 @@ jobs:
   registry-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: test-train-serve  # run after unit tests pass
+    needs: test-train-serve
 
     steps:
       - name: Checkout
@@ -113,10 +95,10 @@ jobs:
             --default-artifact-root file:/tmp/mlruns \
             --host 127.0.0.1 --port 5000 > mlflow.log 2>&1 &
           for i in {1..30}; do
-            curl -s http://127.0.0.1:5000 > /dev/null && break
+            curl -sf http://127.0.0.1:5000 && break || true
             sleep 1
           done
-          curl -s http://127.0.0.1:5000 > /dev/null || (echo "MLflow did not start"; tail -n +1 mlflow.log | sed -n '1,120p'; exit 1)
+          curl -sf http://127.0.0.1:5000 || (echo "MLflow did not start"; tail -n +1 mlflow.log | sed -n '1,120p'; exit 1)
 
       - name: Train + log + register (→ Staging)
         env:
@@ -161,4 +143,133 @@ jobs:
         with:
           name: mlflow-log
           path: mlflow.log
+
+  registry-smoke-persistent:
+    name: Step6 Persistent Registry Smoke (Postgres + S3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: mlflow
+          POSTGRES_PASSWORD: mlflow
+          POSTGRES_DB: mlflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U mlflow -d mlflow"
+          --health-interval=10s --health-timeout=5s --health-retries=5
+
+    env:
+      # Use real AWS creds/bucket via repo secrets
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      # CI Postgres URI (use the service on localhost)
+      MLFLOW_BACKEND_URI: postgresql+psycopg2://mlflow:mlflow@localhost:5432/mlflow
+      # Artifact bucket/prefix from secrets (e.g., s3://my-bucket/mlflow-artifacts)
+      MLFLOW_ARTIFACT_ROOT: ${{ secrets.MLFLOW_ARTIFACT_ROOT }}
+
+      # runtime server URI & model info
+      MLFLOW_TRACKING_URI: http://127.0.0.1:5000
+      MLFLOW_MODEL_NAME: bug-severity-clf
+      MLFLOW_MODEL_STAGE: Production
+      PREDICT_MODEL_SOURCE: registry
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Ensure MLflow script is executable
+        run: chmod +x scripts/mlflow_persistent.sh
+
+      - name: Ensure S3 bucket exists (idempotent)
+        run: |
+          python - << 'PY'
+          import os, urllib.parse, boto3, botocore
+          root = os.environ["MLFLOW_ARTIFACT_ROOT"]
+          assert root.startswith("s3://"), root
+          path = root[5:]
+          bucket, _, _ = path.partition("/")
+          s3 = boto3.client("s3", region_name=os.environ.get("AWS_DEFAULT_REGION"))
+          try:
+            s3.head_bucket(Bucket=bucket)
+          except botocore.exceptions.ClientError:
+            cfg = {"LocationConstraint": os.environ.get("AWS_DEFAULT_REGION")}
+            s3.create_bucket(Bucket=bucket, CreateBucketConfiguration=cfg)
+          PY
+
+      - name: Start MLflow (persistent)
+        run: |
+          nohup bash scripts/mlflow_persistent.sh > mlflow.log 2>&1 &
+          for i in {1..45}; do
+            sleep 1
+            curl -sf "http://127.0.0.1:5000/api/2.0/mlflow/experiments/list" && break || true
+          done
+          curl -sf "http://127.0.0.1:5000/api/2.0/mlflow/experiments/list" || (echo "MLflow did not start"; tail -n 120 mlflow.log; exit 1)
+
+      - name: Train + register (→ Staging)
+        run: |
+          python src/train.py --mlflow
+
+      - name: Promote latest Staging → Production
+        run: |
+          python - <<'PY'
+          from mlflow.tracking import MlflowClient
+          name = "bug-severity-clf"
+          c = MlflowClient()
+          versions = c.search_model_versions(f"name='{name}'")
+          staging = sorted([v for v in versions if v.current_stage == "Staging"], key=lambda v: int(v.version))
+          if not staging:
+              raise SystemExit("No Staging versions found to promote.")
+          latest = staging[-1]
+          c.transition_model_version_stage(name=name, version=latest.version, stage="Production", archive_existing_versions=False)
+          print(f"Promoted {name} v{latest.version} → Production")
+          PY
+
+      - name: Run API (registry mode)
+        run: |
+          python -m uvicorn src.api:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in {1..30}; do
+            sleep 1
+            curl -sf http://127.0.0.1:8000/health && break || true
+          done
+          curl -s http://127.0.0.1:8000/health | tee health.json
+
+      - name: Smoke predict (registry endpoint)
+        run: |
+          curl -s -X POST http://127.0.0.1:8000/predict-mlflow \
+            -H "Content-Type: application/json" \
+            -d '{"title":"App crashes","description":"Null pointer when saving form"}' | tee predict.json
+
+      - name: Batch scoring smoke
+        run: |
+          printf "title,description\nLogin fails,User cannot login with correct creds\n" > /tmp/smoke.csv
+          python src/batch_score.py --input /tmp/smoke.csv --output /tmp/out.csv
+          cat /tmp/out.csv
+
+      - name: Upload logs (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persistent-logs
+          path: |
+            mlflow.log
+            uvicorn.log
+            health.json
+            predict.json
+            /tmp/out.csv
 
